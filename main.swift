@@ -1,6 +1,5 @@
 import Foundation
 import Carbon
-import CoreGraphics
 
 let socketPath = "\(NSHomeDirectory())/.local/run/im-daemon.sock"
 var subscribers: [Int32] = []
@@ -44,47 +43,20 @@ func notifySubscribers() {
     subscribersLock.unlock()
 }
 
-func setupEventTap() -> Bool {
-    let eventMask = (1 << CGEventType.flagsChanged.rawValue)
-
-    guard let tap = CGEvent.tapCreate(
-        tap: .cgSessionEventTap,
-        place: .headInsertEventTap,
-        options: .listenOnly,
-        eventsOfInterest: CGEventMask(eventMask),
-        callback: { _, _, event, _ in
-            DispatchQueue.main.async {
-                notifySubscribers()
-            }
-            return Unmanaged.passUnretained(event)
-        },
-        userInfo: nil
-    ) else {
-        fputs("Failed to create event tap. Need Accessibility permissions.\n", stderr)
-        return false
-    }
-
-    let runLoopSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
-    CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
-    CGEvent.tapEnable(tap: tap, enable: true)
-
-    fputs("CGEventTap enabled\n", stderr)
-    return true
-}
-
-class KeyboardObserver: NSObject {
-    override init() {
-        super.init()
-        DistributedNotificationCenter.default().addObserver(
-            self,
-            selector: #selector(keyboardLayoutChanged),
-            name: NSNotification.Name(kTISNotifySelectedKeyboardInputSourceChanged as String),
-            object: nil
-        )
-    }
-    @objc func keyboardLayoutChanged(_ n: Notification) {
+func setupCFNotificationObserver() {
+    let callback: CFNotificationCallback = { center, observer, name, object, userInfo in
         notifySubscribers()
     }
+
+    CFNotificationCenterAddObserver(
+        CFNotificationCenterGetDistributedCenter(),
+        nil,
+        callback,
+        kTISNotifySelectedKeyboardInputSourceChanged,
+        nil,
+        .deliverImmediately
+    )
+    fputs("CFNotificationCenter observer enabled (deliverImmediately)\n", stderr)
 }
 
 signal(SIGPIPE, SIG_IGN)
@@ -121,12 +93,8 @@ guard listen(serverFd, 10) == 0 else {
 
 fputs("Listening on \(socketPath)\n", stderr)
 
-let observer = KeyboardObserver()
-
-// Try CGEventTap first (faster), fallback to DistributedNotificationCenter
-if !setupEventTap() {
-    fputs("Falling back to DistributedNotificationCenter\n", stderr)
-}
+// CFNotificationCenter with deliverImmediately
+setupCFNotificationObserver()
 
 DispatchQueue.global().async {
     while true {
@@ -167,6 +135,4 @@ DispatchQueue.global().async {
     }
 }
 
-withExtendedLifetime(observer) {
-    RunLoop.main.run()
-}
+RunLoop.main.run()
