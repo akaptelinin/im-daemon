@@ -1,9 +1,11 @@
 import Foundation
 import Carbon
+import CoreGraphics
 
 let socketPath = "\(NSHomeDirectory())/.local/run/im-daemon.sock"
 var subscribers: [Int32] = []
 var subscribersLock = NSLock()
+var lastLayout = ""
 
 func getCurrentLayout() -> String {
     guard let source = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
@@ -25,6 +27,9 @@ func setLayout(_ layoutId: String) -> Bool {
 
 func notifySubscribers() {
     let layout = getCurrentLayout()
+    guard layout != lastLayout else { return }
+    lastLayout = layout
+
     subscribersLock.lock()
     var deadFds: [Int32] = []
     for fd in subscribers {
@@ -37,6 +42,34 @@ func notifySubscribers() {
         subscribers.removeAll { $0 == fd }
     }
     subscribersLock.unlock()
+}
+
+func setupEventTap() -> Bool {
+    let eventMask = (1 << CGEventType.flagsChanged.rawValue)
+
+    guard let tap = CGEvent.tapCreate(
+        tap: .cgSessionEventTap,
+        place: .headInsertEventTap,
+        options: .listenOnly,
+        eventsOfInterest: CGEventMask(eventMask),
+        callback: { _, _, event, _ in
+            DispatchQueue.main.async {
+                notifySubscribers()
+            }
+            return Unmanaged.passUnretained(event)
+        },
+        userInfo: nil
+    ) else {
+        fputs("Failed to create event tap. Need Accessibility permissions.\n", stderr)
+        return false
+    }
+
+    let runLoopSource = CFMachPortCreateRunLoopSource(nil, tap, 0)
+    CFRunLoopAddSource(CFRunLoopGetMain(), runLoopSource, .commonModes)
+    CGEvent.tapEnable(tap: tap, enable: true)
+
+    fputs("CGEventTap enabled\n", stderr)
+    return true
 }
 
 class KeyboardObserver: NSObject {
@@ -89,6 +122,11 @@ guard listen(serverFd, 10) == 0 else {
 fputs("Listening on \(socketPath)\n", stderr)
 
 let observer = KeyboardObserver()
+
+// Try CGEventTap first (faster), fallback to DistributedNotificationCenter
+if !setupEventTap() {
+    fputs("Falling back to DistributedNotificationCenter\n", stderr)
+}
 
 DispatchQueue.global().async {
     while true {
