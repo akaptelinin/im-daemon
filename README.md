@@ -61,7 +61,7 @@ launchctl load ~/Library/LaunchAgents/com.local.im-daemon.plist
 
 ## Use with Neovim
 
-See [keyboard-layout.lua](https://gist.github.com/) for a lualine integration example using subscribe.
+See [keyboard-layout.lua](https://github.com/akaptelinin/nvim-config/blob/master/lua/plugins/keyboard-layout.lua) for a lualine integration example using subscribe.
 
 ## License
 
