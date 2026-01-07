@@ -4,7 +4,7 @@ A lightweight macOS daemon for keyboard layout detection with push notifications
 
 ## Features
 
-- **Fast** — ~1ms latency vs ~22ms for fork/exec alternatives like `im-select`
+- **Fast** — ~0.04ms latency vs ~27ms for fork/exec alternatives like `im-select`
 - **Push model** — subscribe once, get notified on every layout change
 - **Simple protocol** — text-based commands over Unix socket
 
